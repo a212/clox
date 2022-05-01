@@ -2,11 +2,13 @@
 #include <stdio.h>
 #include "debug.h"
 #include "value.h"
+#include "line.h"
 
 void disassembleChunk(Chunk *chunk, const char *name) {
 	printf("== %s ==\n", name);
+	int prevLine = 0;
 	for (int offset = 0; offset < chunk->count;) {
-		offset = disassembleInstruction(chunk, offset);
+		offset = disassembleInstruction(chunk, offset, &prevLine);
 	}
 }
 
@@ -23,12 +25,14 @@ static int constantInstruction(const char *name, Chunk *chunk, int offset) {
 	return offset + 2;
 }
 
-int disassembleInstruction(Chunk *chunk, int offset) {
+int disassembleInstruction(Chunk *chunk, int offset, int *prevLine) {
 	printf("%04d ", offset);
-	if (offset > 0 && chunk->lines[offset] == chunk->lines[offset-1]) {
+	int line = getLine(chunk, offset);
+	if (offset > 0 && line == *prevLine) {
 		printf("   | ");
 	} else {
-		printf("%4d ", chunk->lines[offset]);
+		printf("%4d ", line);
+		*prevLine = line;
 	}
 	uint8_t instruction = chunk->code[offset];
 	switch (instruction) {
