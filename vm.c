@@ -24,6 +24,13 @@ Value pop() {
 	}
 }
 
+static void ternary() {
+	Value valF = pop();
+	Value valT = pop();
+	Value cond = pop();
+	push(cond > 0 ? valT : valF);
+}
+
 void initVM() {
 	resetStack();
 }
@@ -66,6 +73,9 @@ static InterpretResult run() {
 			case OP_DIVIDE: BINARY_OP(/); break;
 			case OP_NEGATE:
 				push(-pop());
+				break;
+			case OP_TERNARY:
+				ternary();
 				break;
 			case OP_RETURN:
 				printValue(pop());
