@@ -49,6 +49,8 @@ typedef struct {
 	Local locals[UINT8_COUNT];
 	int localCount;
 	int scopeDepth;
+	int loopStart;
+	int loopScopeDepth;
 } Compiler;
 
 static ParseRule *getRule(TokenType type);
@@ -332,7 +334,7 @@ ParseRule rules[] = {
   [TOKEN_STRING]        = {string,   NULL,   PREC_NONE},
   [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},
   [TOKEN_AND]           = {NULL,     and_,   PREC_NONE},
-  [TOKEN_CLASS]         = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_CONTINUE]      = {NULL,     NULL,   PREC_NONE},
   [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},
   [TOKEN_FALSE]         = {literal,  NULL,   PREC_NONE},
   [TOKEN_FOR]           = {NULL,     NULL,   PREC_NONE},
@@ -381,13 +383,17 @@ static void beginScope() {
 	current->scopeDepth++;
 }
 
-static void endScope() {
-	current->scopeDepth--;
+static void endScopeOffset(int offset) {
+	current->scopeDepth -= offset;
 
 	while (current->localCount > 0 && current->locals[current->localCount - 1].depth > current->scopeDepth) {
 		emitByte(OP_POP);
 		current->localCount--;
 	}
+}
+
+static void endScope() {
+	endScopeOffset(1);
 }
 
 static void block() {
@@ -423,6 +429,17 @@ static void emitLoop(int loopStart) {
 	emitByte(offset & 0xff);
 }
 
+static void loopBody(int loopStart) {
+	int oldLoopStart = current->loopStart;
+	int oldLoopScopeDepth = current->loopScopeDepth;
+	current->loopStart = loopStart;
+	current->loopScopeDepth = current->scopeDepth;
+	statement();
+	emitLoop(loopStart);
+	current->loopStart = oldLoopStart;
+	current->loopScopeDepth = oldLoopScopeDepth;
+}
+
 static void whileStatement() {
 	consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
 	expression();
@@ -432,8 +449,7 @@ static void whileStatement() {
 	int exitJump = emitJump(OP_JUMP_IF_FALSE);
 	emitByte(OP_POP);
 
-	statement();
-	emitLoop(loopStart);
+	loopBody(loopStart);
 
 	patchJump(exitJump);
 	emitByte(OP_POP);
@@ -468,14 +484,26 @@ static void forStatement() {
 		loopStart = incrementStart;
 		patchJump(bodyJump);
 	}
-	statement();
-	emitLoop(loopStart);
+
+	loopBody(loopStart);
+
 	if (exitJump != -1) {
 		patchJump(exitJump);
 		emitByte(OP_POP);
 	}
 	endScope();
 }
+
+static void continueStatement() {
+	if (current->loopStart == - 1) {
+		error("Continue is not encolosed in a loop");
+		return;
+	}
+	endScopeOffset(current->loopScopeDepth - current->scopeDepth);
+	emitLoop(current->loopStart);
+	consume(TOKEN_SEMICOLON, "Expect: ';' continue.");
+}
+
 
 static void statement() {
 	if (match(TOKEN_PRINT)) {
@@ -486,6 +514,8 @@ static void statement() {
 		whileStatement();
 	} else if (match(TOKEN_FOR)) {
 		forStatement();
+	} else if (match(TOKEN_CONTINUE)) {
+		continueStatement();
 	} else if (match(TOKEN_LEFT_BRACE)) {
 		beginScope();
 		block();
@@ -500,7 +530,7 @@ static void synchronize() {
 	while (parser.current.type != TOKEN_EOF) {
 		if (parser.previous.type == TOKEN_SEMICOLON) return;
 		switch (parser.current.type) {
-			case TOKEN_CLASS:
+			case TOKEN_CONTINUE:
 			case TOKEN_FUN:
 			case TOKEN_VAR:
 			case TOKEN_FOR:
@@ -589,6 +619,7 @@ static void initCompiler(Compiler* compiler)
 {
 	compiler->localCount = 0;
 	compiler->scopeDepth = 0;
+	compiler->loopStart = -1;
 	current = compiler;
 }
 
